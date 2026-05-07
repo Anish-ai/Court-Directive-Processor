@@ -4,7 +4,7 @@
 
 **From Court Judgments to Verified Action Plans**
 
-An AI-assisted judicial decision support system that reads court judgment PDFs, extracts critical legal directives through a multi-agent pipeline, generates party-specific action plans, and delivers only human-verified records to a trusted administrative dashboard.
+An AI-assisted judicial decision support system that reads court judgment PDFs (text or scanned), extracts critical legal directives through a multi-agent pipeline, generates party-specific action plans, provides a hybrid RAG-powered chatbot for legal intelligence, and delivers only human-verified records to a trusted administrative dashboard.
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.2-black?logo=next.js)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](https://www.typescriptlang.org)
@@ -54,7 +54,7 @@ The Court Case Monitoring System (CCMS) receives court judgments from the High C
 CDP is **not** a fully automated system — it is an **AI-assisted decision support tool** that augments human judgment with intelligent extraction and analysis.
 
 ```
-📄 PDF Upload → 🤖 7-Agent AI Pipeline → 👤 Human Review → 📊 Verified Dashboard
+📄 PDF Upload → 🔍 Hybrid Ingestion → 🤖 7-Agent AI Pipeline → 🧠 RAG Indexing → 👤 Human Review → 💬 Chatbot → 📊 Verified Dashboard
 ```
 
 ### Key Design Principles
@@ -71,16 +71,18 @@ CDP is **not** a fully automated system — it is an **AI-assisted decision supp
 
 ## 🤖 Multi-Agent Architecture
 
-The monolithic single-prompt approach is replaced by a **pipeline of 7 specialized AI agents**, each with a precise role, dedicated prompt, and structured JSON schema.
+The monolithic single-prompt approach is replaced by a **pipeline of 8 stages across 7 specialized AI agents + RAG indexing**, each with a precise role, dedicated prompt, and structured JSON schema.
 
 ```
                           ┌──────────────────────────────────┐
                           │   📄 PDF Upload                  │
+                          │   (Text PDF / Scanned PDF)       │
                           └──────────┬───────────────────────┘
                                      │
                           ┌──────────▼───────────────────────┐
-                          │ Agent 1: Ingestion Agent          │
-                          │ (Code-only — pdf-parse, no LLM)  │
+                          │ Agent 1: Hybrid Ingestion Agent   │
+                          │ Text → pdf-parse (fast, free)    │
+                          │ Scanned → Gemini Vision OCR      │
                           │ Output: full_text, page_map       │
                           └──────────┬───────────────────────┘
                                      │
@@ -122,7 +124,13 @@ The monolithic single-prompt approach is replaced by a **pipeline of 7 specializ
                           └──────────┬───────────────────────┘
                                      │
                           ┌──────────▼───────────────────────┐
+                          │ Stage 8: RAG Indexing             │
+                          │ (Chunk → Embed → Vector Store)   │
+                          └──────────┬───────────────────────┘
+                                     │
+                          ┌──────────▼───────────────────────┐
                           │   👤 Human Review Console         │
+                          │   💬 RAG Chatbot Available        │
                           └──────────┬───────────────────────┘
                                      │
                           ┌──────────▼───────────────────────┐
@@ -134,39 +142,82 @@ The monolithic single-prompt approach is replaced by a **pipeline of 7 specializ
 
 | # | Agent | Type | Role | Key Output |
 |---|---|---|---|---|
-| 1 | **Ingestion Agent** | Code-only | PDF → text with page mapping | `full_text`, `page_map`, `page_count` |
+| 1 | **Hybrid Ingestion Agent** | Code + Vision | PDF → text (dual-mode: pdf-parse or Gemini Vision OCR) | `full_text`, `page_map`, `page_count` |
 | 2 | **Extraction Agent** | LLM | Deep structural extraction | Case details, parties (with types & advocates), directions, cited statutes, relief, outcome |
 | 3 | **Legal Analyst Agent** | LLM | Legal reasoning & obligation mapping | Obligations, appeal analysis (forum, grounds, limitation), compliance risks, legal summary |
 | 4 | **Timeline Agent** | LLM | Deadline extraction & inference | Explicit + inferred deadlines, urgency classification, days remaining |
 | 5 | **Petitioner Action Agent** | LLM | Petitioner-specific action planning | Enforcement, monitoring, protective actions with deadlines and effort estimates |
 | 6 | **Respondent Action Agent** | LLM | Respondent-specific action planning | Compliance, appeal, financial, departmental coordination actions with risk assessments |
 | 7 | **Synthesis Agent** | LLM | Cross-validation & unification | Deduplicated actions, calibrated confidence, validation notes, overall confidence score |
+| 8 | **RAG Indexing** | Embeddings | Chunk → embed → index for chatbot retrieval | Vector-indexed chunks in in-memory store |
 
 **Performance optimization:** Agents 3+4 run in parallel, and Agents 5+6 run in parallel — reducing total pipeline time by ~40%.
 
+### Hybrid Ingestion (Text + Scanned PDFs)
+
+The upload interface provides a user-selectable toggle:
+
+| Mode | Engine | Best For |
+|---|---|---|
+| **Text PDF** (default) | `pdf-parse` — fast, no API cost | Digitally-created PDFs |
+| **Scanned PDF** | Gemini Vision OCR — AI-powered | Image-based / scanned PDFs |
+
+The text mode includes a **smart quality check** (word count, character density, average word length) that automatically falls back to Vision OCR if the extracted text quality is too low.
+
 ---
 
-## 💬 RAG Legal Chatbot
+## 💬 Hybrid RAG Legal Chatbot
 
-CDP includes a built-in **Retrieval-Augmented Generation (RAG) chatbot** available on the Review and Case Detail pages.
+CDP includes a built-in **Hybrid RAG (Retrieval-Augmented Generation) chatbot** available on the Review and Case Detail pages. It combines semantic vector search with structured pipeline data for grounded legal intelligence.
 
-### Capabilities
+### Architecture
 
-- **Natural language queries** — Ask plain-language questions about the judgment
-- **Source-grounded responses** — Every answer cites the specific page and paragraph from the original judgment
-- **Intent-based routing** — Automatically routes questions about directions, deadlines, appeals, consequences, departments
-- **Suggested questions** — Pre-built prompts for common queries
-- **Context-aware** — Uses the full pipeline output (extraction, legal analysis, timeline, actions) as its knowledge base
+```
+User Question
+  → Query Router (LLM classifies into 1 of 4 types)
+  → Pipeline dispatch:
+     VERIFIED_RECORD  → searches extracted data/synthesis
+     JUDGMENT_RAG     → embed query → vector search → rerank → grounded generation
+     GENERAL_LEGAL    → legal KB lookup + Gemini reasoning
+     MIXED_REASONING  → combines RAG + verified records + analysis
+  → Response with: mode badge, confidence %, source citations
+```
+
+### RAG Infrastructure (`src/lib/rag/`)
+
+| Module | Purpose |
+|---|---|
+| `chunker.ts` | Paragraph-aware splitting (40–400 words) with page metadata |
+| `embeddings.ts` | Gemini `gemini-embedding-001` with batch processing |
+| `vector-store.ts` | In-memory cosine-similarity search with metadata filtering |
+| `reranker.ts` | LLM reranking (60% relevance + 25% semantic + 15% keyword) |
+| `query-router.ts` | 4-way LLM classification with keyword fallback |
+| `legal-kb.ts` | 16-entry Indian legal glossary (contempt, PIL, SLP, mandamus, etc.) |
+| `chat-engine.ts` | Central orchestrator for all 4 pipelines |
+
+### Chatbot Features
+
+| Feature | Description |
+|---|---|
+| **4-Way Query Routing** | Auto-classifies questions into Verified Record / Judgment RAG / General Legal / Mixed Reasoning |
+| **Mode Badges** | Each response shows its intelligence mode (🛡️ Verified / 🔍 Source-Grounded / 🧠 General / ✨ Mixed) |
+| **Confidence Scores** | Per-response confidence percentage with color-coded indicators |
+| **Source Citations** | Expandable panel showing page numbers, text excerpts, and relevance scores |
+| **Explain Simply** 💡 | Button that rewrites any response in plain English, removing legal jargon |
+| **Alternative Answer** 🔄 | Collapsible alternative interpretation for every response |
+| **Conversation Memory** | Maintains last 6 messages for contextual follow-ups |
+| **Graceful Fallback** | Falls back to verified records when RAG index is unavailable |
+| **Suggested Questions** | Pre-built prompts for common legal queries |
 
 ### Example Interactions
 
-| User Question | Chatbot Behavior |
-|---|---|
-| *"What are the key directions?"* | Lists all extracted directions with IDs and source references |
-| *"What is the deadline for compliance?"* | Shows critical deadlines with days remaining |
-| *"Should we file an appeal?"* | Presents appeal analysis with forum, grounds, and limitation period |
-| *"What happens if the deadline is missed?"* | Shows compliance risks and consequences |
-| *"Which departments need to be notified?"* | Lists all responsible departments from action plans |
+| User Question | Route | Chatbot Behavior |
+|---|---|---|
+| *"What are the key directions?"* | `JUDGMENT_RAG` | Retrieves from vector index, cites [Source N] with page numbers |
+| *"What is the compliance deadline?"* | `VERIFIED_RECORD` | Reads from approved action plans and timeline data |
+| *"What is contempt of court?"* | `GENERAL_LEGAL` | Explains using built-in legal knowledge base + Gemini |
+| *"Why is this judgment risky?"* | `MIXED_REASONING` | Combines RAG evidence with analytical reasoning |
+| *"Should we file an appeal?"* | `MIXED_REASONING` | Presents appeal analysis with forum, grounds, and limitation period |
 
 ---
 
@@ -235,7 +286,10 @@ Only approved records appear:
 | **Framework** | Next.js 16 (App Router) | Full-stack React framework with API routes |
 | **Language** | TypeScript 5 | Type-safe development |
 | **AI/LLM** | Google Gemini 2.5 Flash | Multi-agent prompt execution with JSON mode |
+| **Embeddings** | Gemini `gemini-embedding-001` | Document chunk embeddings for RAG |
+| **OCR** | Gemini Vision | Visual OCR for scanned/image-based PDFs |
 | **PDF Processing** | pdf-parse 2.x | PDF text extraction with page-level mapping |
+| **Vector Store** | In-memory (custom) | Cosine-similarity search with metadata filtering |
 | **Styling** | Tailwind CSS 4 | Utility-first CSS with dark mode support |
 | **Icons** | Lucide React | Consistent icon system |
 | **State Management** | React Context API | Client-side pipeline state |
@@ -250,8 +304,12 @@ Only approved records appear:
 src/
 ├── app/
 │   ├── api/
-│   │   ├── process/          # 🔧 Orchestrator — runs the full 7-agent pipeline
+│   │   ├── process/          # 🔧 Orchestrator — runs the full 8-stage pipeline
 │   │   │   └── route.ts
+│   │   ├── chat/              # 💬 Hybrid RAG chatbot endpoint
+│   │   │   ├── route.ts       #    Main chat API
+│   │   │   └── simplify/      #    "Explain Simply" API
+│   │   │       └── route.ts
 │   │   ├── extract/           # (Legacy) Single extraction route
 │   │   │   └── route.ts
 │   │   └── generateAction/    # (Legacy) Single action generation route
@@ -262,28 +320,36 @@ src/
 │   ├── review/
 │   │   └── page.tsx           # 👤 Human verification console
 │   ├── upload/
-│   │   └── page.tsx           # 📄 PDF upload & pipeline trigger
+│   │   └── page.tsx           # 📄 PDF upload with Text/Scanned toggle
 │   ├── layout.tsx             # 🎨 Root layout with header & theme
 │   ├── page.tsx               # 📊 Dashboard — verified case registry
-│   └── providers.tsx          # 🔌 React Context for pipeline state
+│   └── providers.tsx          # 🔌 React Context (pipeline state + caseId)
 ├── components/
 │   ├── ActionCard.tsx         # Action item card with confidence & risk
 │   ├── ExtractionPanel.tsx    # Editable extraction fields
-│   ├── LegalChatbot.tsx       # 💬 RAG-powered legal assistant
+│   ├── LegalChatbot.tsx       # 💬 Hybrid RAG chatbot (4 modes + simplify + alt answers)
 │   ├── PDFViewer.tsx          # PDF source panel
-│   ├── ProcessingPipeline.tsx # 7-stage pipeline progress visualizer
+│   ├── ProcessingPipeline.tsx # 8-stage pipeline progress visualizer
 │   ├── ThemeProvider.tsx      # Dark/light mode provider
 │   └── ThemeToggle.tsx        # Theme switch button
 └── lib/
-    └── agents/
-        ├── llm.ts             # 🔗 Shared LLM utility (retry + model fallback)
-        ├── ingestion.ts       # Agent 1 — PDF text extraction
-        ├── extraction.ts      # Agent 2 — Structural extraction
-        ├── legal-analyst.ts   # Agent 3 — Legal analysis
-        ├── timeline.ts        # Agent 4 — Timeline mapping
-        ├── petitioner.ts      # Agent 5 — Petitioner actions
-        ├── respondent.ts      # Agent 6 — Respondent actions
-        └── synthesis.ts       # Agent 7 — Cross-validation & synthesis
+    ├── agents/
+    │   ├── llm.ts             # 🔗 Shared LLM utility (retry + model fallback)
+    │   ├── ingestion.ts       # Agent 1 — Hybrid PDF ingestion (text + Gemini Vision OCR)
+    │   ├── extraction.ts      # Agent 2 — Structural extraction
+    │   ├── legal-analyst.ts   # Agent 3 — Legal analysis
+    │   ├── timeline.ts        # Agent 4 — Timeline mapping
+    │   ├── petitioner.ts      # Agent 5 — Petitioner actions
+    │   ├── respondent.ts      # Agent 6 — Respondent actions
+    │   └── synthesis.ts       # Agent 7 — Cross-validation & synthesis
+    └── rag/
+        ├── chunker.ts         # 📦 Paragraph-aware document chunking
+        ├── embeddings.ts      # 🧬 Gemini embedding-001 + cosine similarity
+        ├── vector-store.ts    # 🗄️ In-memory vector store
+        ├── reranker.ts        # 🎯 LLM-based chunk reranking
+        ├── query-router.ts    # 🔀 4-way query classification
+        ├── legal-kb.ts        # 📚 Static legal glossary (16 entries)
+        └── chat-engine.ts     # 🧠 Central RAG orchestrator
 ```
 
 ---
@@ -344,29 +410,72 @@ GEMINI_API_KEY="your-google-gemini-api-key-here"
 
 ### `POST /api/process`
 
-The primary orchestrator endpoint. Accepts a PDF file, runs the full 7-agent pipeline, and returns all agent outputs.
+The primary orchestrator endpoint. Accepts a PDF file, runs the full 8-stage pipeline, and returns all agent outputs.
 
 **Request:**
 ```
 Content-Type: multipart/form-data
-Body: file (PDF)
+Body: file (PDF), pdfType ("text" | "scanned")
 ```
 
 **Response:**
 ```json
 {
-  "extraction": { ... },        // Agent 2 output
-  "legalAnalysis": { ... },     // Agent 3 output
-  "timeline": { ... },          // Agent 4 output
-  "petitionerActions": { ... }, // Agent 5 output
-  "respondentActions": { ... }, // Agent 6 output
-  "synthesis": { ... }          // Agent 7 output (final unified plan)
+  "caseId": "CASE_123",          // Generated case ID for RAG
+  "extraction": { ... },          // Agent 2 output
+  "legalAnalysis": { ... },       // Agent 3 output
+  "timeline": { ... },            // Agent 4 output
+  "petitionerActions": { ... },   // Agent 5 output
+  "respondentActions": { ... },   // Agent 6 output
+  "synthesis": { ... }            // Agent 7 output (final unified plan)
 }
 ```
 
 **Pipeline Execution Order:**
 ```
-Agent 1 (Ingestion) → Agent 2 (Extraction) → [Agent 3 ∥ Agent 4] → [Agent 5 ∥ Agent 6] → Agent 7 (Synthesis)
+Agent 1 (Hybrid Ingestion) → Agent 2 (Extraction) → [Agent 3 ∥ Agent 4] → [Agent 5 ∥ Agent 6] → Agent 7 (Synthesis) → Stage 8 (RAG Indexing)
+```
+
+### `POST /api/chat`
+
+Hybrid RAG chatbot endpoint.
+
+**Request:**
+```json
+{
+  "query": "What are the key directions?",
+  "caseId": "CASE_123",
+  "extractedData": { ... },
+  "synthesis": { ... },
+  "conversationHistory": []
+}
+```
+
+**Response:**
+```json
+{
+  "answer": "Based on [Source 1]...",
+  "alternative_answer": "An alternative reading...",
+  "mode": "SOURCE_GROUNDED_JUDGMENT",
+  "confidence": 0.85,
+  "sources": [{ "page": 3, "text": "...", "score": 0.92, "chunk_id": "..." }],
+  "query_type": "JUDGMENT_RAG",
+  "reasoning": "Retrieved 11 chunks, reranked to top 5."
+}
+```
+
+### `POST /api/chat/simplify`
+
+Rewrites a legal response in plain English.
+
+**Request:**
+```json
+{ "text": "The petitioner shall file a compliance affidavit..." }
+```
+
+**Response:**
+```json
+{ "simplified": "The person who filed the case must submit a sworn statement..." }
 ```
 
 ### Resilience Features
