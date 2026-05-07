@@ -7,7 +7,7 @@ import ProcessingPipeline from '@/components/ProcessingPipeline';
 
 export default function UploadPage() {
   const router = useRouter();
-  const { setActiveFile, setExtractedData, setActionPlan } = useAppContext();
+  const { setActiveFile, setPipelineResult } = useAppContext();
   const [file, setLocalFile] = useState<File | null>(null);
   
   const [pipelineStatus, setPipelineStatus] = useState<"idle" | "processing" | "retrying" | "error" | "success">("idle");
@@ -24,30 +24,17 @@ export default function UploadPage() {
       const formData = new FormData();
       formData.append('file', file as File);
       
-      const extRes = await fetch('/api/extract', {
+      const res = await fetch('/api/process', {
         method: 'POST',
         body: formData
       });
       
-      if (!extRes.ok) {
-        throw new Error("Failed to extract structure");
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}));
+        throw new Error(errorBody.details || "Pipeline processing failed");
       }
       
-      const extractionData = await extRes.json();
-      
-      const actRes = await fetch('/api/generateAction', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(extractionData)
-      });
-      
-      if (!actRes.ok) {
-        throw new Error("Failed to formulate plans");
-      }
-      
-      const actionData = await actRes.json();
-      
-      return { extractionData, actionData };
+      return await res.json();
     } catch (err: any) {
       if (retryCount === 0) {
         setPipelineStatus("retrying");
@@ -62,15 +49,13 @@ export default function UploadPage() {
     setPipelineStatus("processing");
 
     try {
-      // Execute the intelligence engine in parallel with the visual pipeline
-      const { extractionData, actionData } = await runAnalysis();
+      const result = await runAnalysis();
       
-      // Save payload to global memory context
+      // Save full pipeline payload to global context
       setActiveFile(file);
-      setExtractedData(extractionData);
-      setActionPlan(actionData);
+      setPipelineResult(result);
       
-      // Trigger the success signal. The pipeline visualizer will catch this and gracefully finish.
+      // Trigger the success signal
       setPipelineStatus("success");
       
     } catch (err: any) {
@@ -87,7 +72,6 @@ export default function UploadPage() {
 
   return (
     <div className="flex px-4 py-16 justify-center items-center flex-1 relative min-h-[calc(100vh-80px)] overflow-y-auto">
-      {/* Decorative texture ignored for sleek UX */}
       <div className="w-full max-w-2xl flex flex-col gap-8 pb-10">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-3xl shadow-xl dark:shadow-2xl dark:shadow-indigo-900/20 overflow-hidden relative backdrop-blur-xl z-10 transition-colors">
           
@@ -98,7 +82,7 @@ export default function UploadPage() {
               <ScanLine className="text-blue-600 dark:text-cyan-400" />
               Intelligence Ingestion Portal
             </h2>
-            <p className="text-slate-500 dark:text-slate-400 text-sm mt-1.5 font-medium">Initialize the core analysis engine by providing structured or unstructured judicial documentation.</p>
+            <p className="text-slate-500 dark:text-slate-400 text-sm mt-1.5 font-medium">Initialize the multi-agent analysis engine by providing structured or unstructured judicial documentation.</p>
           </div>
           
           <div className="p-10 relative">

@@ -70,7 +70,7 @@ ${text}
     // Make request via GoogleGenAI SDK to Gemini 3.1 Pro
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         temperature: 0.2,
@@ -79,7 +79,7 @@ ${text}
     });
 
     const resultText = response.text;
-    
+
     if (!resultText) {
       throw new Error("Failed to receive a valid response from Gemini");
     }
@@ -90,9 +90,9 @@ ${text}
 
   } catch (error: any) {
     console.error('API /extract Error:', error.response?.data || error.message);
-    return NextResponse.json({ 
-      error: 'Failed to process judgment', 
-      details: error.response?.data?.error?.message || error.message 
+    return NextResponse.json({
+      error: 'Failed to process judgment',
+      details: error.response?.data?.error?.message || error.message
     }, { status: 500 });
   }
 }

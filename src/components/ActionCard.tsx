@@ -1,15 +1,20 @@
 "use client";
 
-import { AlertCircle, CalendarClock, Briefcase, ChevronRight } from "lucide-react";
+import { AlertCircle, CalendarClock, Briefcase, ChevronRight, ShieldAlert, Link2 } from "lucide-react";
 
 export interface ActionPlanItem {
-  type: "compliance" | "appeal" | "review" | string;
+  action_id?: string;
+  type: string;
   description: string;
   deadline: string;
   responsible_department: string;
-  priority: "high" | "medium" | "low" | string;
+  priority: "critical" | "high" | "medium" | "low" | string;
   confidence: number;
   justification: string;
+  estimated_effort?: string;
+  compliance_risk_if_missed?: string;
+  linked_obligation_id?: string;
+  linked_timeline_id?: string;
 }
 
 export default function ActionCard({ action, isEditable = false, onChange }: { action: ActionPlanItem, isEditable?: boolean, onChange?: (updated: ActionPlanItem) => void }) {
@@ -36,6 +41,7 @@ export default function ActionCard({ action, isEditable = false, onChange }: { a
   
   const getPriorityColor = (priority: string) => {
     const p = priority?.toLowerCase() || '';
+    if (p === 'critical') return "bg-rose-600 text-white shadow-rose-600/40 ring-1 ring-rose-400";
     if (p === 'high') return "bg-rose-500 text-white shadow-rose-500/40";
     if (p === 'medium') return "bg-amber-500 text-white shadow-amber-500/40";
     if (p === 'low') return "bg-blue-500 text-white shadow-blue-500/40";
@@ -53,7 +59,12 @@ export default function ActionCard({ action, isEditable = false, onChange }: { a
       <div className={`absolute top-0 left-0 w-1.5 h-full ${confidence === 'high' ? 'bg-emerald-500' : confidence === 'medium' ? 'bg-amber-500' : 'bg-rose-500'}`} />
       
       <div className="flex justify-between items-start mb-4 ml-3">
-        <div className="flex gap-2.5 items-center">
+        <div className="flex gap-2 items-center flex-wrap">
+           {action.action_id && (
+             <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 dark:bg-slate-700 text-white font-mono tracking-wider shadow-sm">
+               {action.action_id}
+             </span>
+           )}
            <span className={`text-[10px] px-2.5 py-1 rounded-full font-black uppercase tracking-[0.15em] shadow-md ${getPriorityColor(action.priority)}`}>
               {action.priority} priority
            </span>
@@ -116,10 +127,36 @@ export default function ActionCard({ action, isEditable = false, onChange }: { a
           </div>
         </div>
 
+        {/* Estimated Effort */}
+        {action.estimated_effort && (
+          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-2">
+            <span className="font-bold uppercase tracking-widest text-[10px]">Effort:</span>
+            <span className="font-medium">{action.estimated_effort}</span>
+          </div>
+        )}
+
+        {/* Linked References */}
+        {(action.linked_obligation_id || action.linked_timeline_id) && (
+          <div className="flex items-center gap-3 text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+            <Link2 size={12} />
+            {action.linked_obligation_id && <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{action.linked_obligation_id}</span>}
+            {action.linked_timeline_id && <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{action.linked_timeline_id}</span>}
+          </div>
+        )}
+
+        {/* Justification */}
         {action.justification && (
           <div className="mt-4 bg-white/50 dark:bg-black/30 p-3 rounded-xl border border-slate-300 dark:border-white/5 flex items-start gap-3 backdrop-blur-sm transition-colors">
             <ChevronRight size={16} className="mt-0.5 text-blue-600 dark:text-cyan-500 shrink-0" />
             <span className="text-[13px] text-slate-700 dark:text-slate-300 leading-relaxed font-medium transition-colors">{action.justification}</span>
+          </div>
+        )}
+
+        {/* Compliance Risk */}
+        {action.compliance_risk_if_missed && (
+          <div className="mt-2 bg-rose-50 dark:bg-rose-500/10 p-3 rounded-xl border border-rose-200 dark:border-rose-500/20 flex items-start gap-3 transition-colors">
+            <ShieldAlert size={16} className="mt-0.5 text-rose-500 shrink-0" />
+            <span className="text-[13px] text-rose-700 dark:text-rose-300 leading-relaxed font-medium">{action.compliance_risk_if_missed}</span>
           </div>
         )}
       </div>
