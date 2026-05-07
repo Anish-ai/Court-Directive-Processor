@@ -1,169 +1,206 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { MessageCircle, X, Send, Bot, User, ChevronRight, Sparkles, BookOpen } from "lucide-react";
+import {
+  MessageCircle, X, Send, Bot, User, ChevronRight, Sparkles, BookOpen,
+  Shield, Search, Brain, AlertTriangle, ChevronDown, ChevronUp, Flag,
+  Lightbulb, RefreshCw
+} from "lucide-react";
+
+interface ChatSource {
+  page: number;
+  text: string;
+  score: number;
+  chunk_id: string;
+}
+
+type ResponseMode =
+  | "VERIFIED_OPERATIONAL"
+  | "SOURCE_GROUNDED_JUDGMENT"
+  | "GENERAL_LEGAL"
+  | "MIXED_ANALYTICAL"
+  | "INSUFFICIENT_EVIDENCE";
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
-  sources?: { page: string; text: string }[];
+  mode?: ResponseMode;
+  confidence?: number;
+  sources?: ChatSource[];
+  query_type?: string;
+  reasoning?: string;
+  alternative_answer?: string;
+  simplified?: string;
   timestamp: Date;
 }
+
+const MODE_CONFIG: Record<ResponseMode, { label: string; color: string; darkColor: string; icon: any }> = {
+  VERIFIED_OPERATIONAL: { label: "Verified Record", color: "bg-emerald-100 text-emerald-700 border-emerald-200", darkColor: "dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20", icon: Shield },
+  SOURCE_GROUNDED_JUDGMENT: { label: "Source-Grounded", color: "bg-blue-100 text-blue-700 border-blue-200", darkColor: "dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20", icon: Search },
+  GENERAL_LEGAL: { label: "General Legal", color: "bg-amber-100 text-amber-700 border-amber-200", darkColor: "dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20", icon: Brain },
+  MIXED_ANALYTICAL: { label: "Mixed Analysis", color: "bg-purple-100 text-purple-700 border-purple-200", darkColor: "dark:bg-purple-500/10 dark:text-purple-400 dark:border-purple-500/20", icon: Sparkles },
+  INSUFFICIENT_EVIDENCE: { label: "Insufficient Evidence", color: "bg-red-100 text-red-700 border-red-200", darkColor: "dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20", icon: AlertTriangle },
+};
 
 const SUGGESTED_QUESTIONS = [
   "What are the key directions in this judgment?",
   "What is the deadline for compliance?",
-  "Who is the respondent obligated to report to?",
-  "Should the respondent consider filing an appeal?",
-  "What happens if the respondent misses the deadline?",
-  "What departments need to be notified?",
+  "Should the department consider filing an appeal?",
+  "What is contempt of court?",
+  "Why is this judgment risky for the department?",
+  "Which departments need to be notified?",
 ];
 
-// Simulated RAG responses keyed by intent
-function getSimulatedResponse(question: string, extractedData: any, synthesis: any): ChatMessage {
-  const q = question.toLowerCase();
+function ConfidenceBadge({ confidence }: { confidence: number }) {
+  const pct = Math.round(confidence * 100);
+  const color = pct >= 80 ? "text-emerald-600 dark:text-emerald-400" : pct >= 50 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400";
+  return (
+    <span className={`text-[10px] font-black tracking-wider ${color}`}>
+      {pct}% confidence
+    </span>
+  );
+}
 
-  const caseName = extractedData?.case_details?.case_number || "this case";
-  const petitioner = typeof extractedData?.parties?.petitioner === "object"
-    ? extractedData?.parties?.petitioner?.name
-    : extractedData?.parties?.petitioner || "the petitioner";
-  const respondent = typeof extractedData?.parties?.respondent === "object"
-    ? extractedData?.parties?.respondent?.name
-    : extractedData?.parties?.respondent || "the respondent";
-  const judge = extractedData?.case_details?.judge || "the presiding judge";
-  const court = extractedData?.case_details?.court || "the court";
-  const outcome = extractedData?.case_outcome || synthesis?.case_summary?.outcome || "disposed";
-  const legalSummary = synthesis?.case_summary?.legal_summary || "The court has issued directions requiring timely compliance from the concerned parties.";
+function SourcePanel({ sources }: { sources: ChatSource[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!sources || sources.length === 0) return null;
 
-  const directions = extractedData?.key_directions || [];
-  const deadlines = synthesis?.critical_deadlines || [];
-  const appealRec = synthesis?.appeal_recommendation;
-  const respondentActions = synthesis?.respondent_actions || [];
-  const petitionerActions = synthesis?.petitioner_actions || [];
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors"
+      >
+        <BookOpen size={10} />
+        {sources.length} source{sources.length > 1 ? "s" : ""} cited
+        {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+      </button>
+      {expanded && (
+        <div className="mt-1.5 space-y-1.5">
+          {sources.map((src, i) => (
+            <div
+              key={i}
+              className="flex items-start gap-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-500/5 border border-indigo-100 dark:border-indigo-500/10 rounded-xl"
+            >
+              <BookOpen size={11} className="text-indigo-500 dark:text-indigo-400 mt-0.5 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  {src.page > 0 && (
+                    <span className="text-[9px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider bg-indigo-100 dark:bg-indigo-500/20 px-1.5 py-0.5 rounded">
+                      Page {src.page}
+                    </span>
+                  )}
+                  <span className="text-[9px] text-indigo-400 dark:text-indigo-500">
+                    relevance: {Math.round(src.score * 100)}%
+                  </span>
+                </div>
+                <p className="text-[11px] text-indigo-500/70 dark:text-indigo-300/50 mt-0.5 line-clamp-3">
+                  {src.text}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-  // Match intent
-  if (q.includes("key direction") || q.includes("order") || q.includes("directive")) {
-    const dirList = directions.length > 0
-      ? directions.map((d: any, i: number) => `${d.direction_id || `D${i + 1}`}: "${d.text}"`).join("\n\n")
-      : "No specific directions were extracted from this judgment.";
-    return {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `Based on my analysis of ${caseName}, the following key directions were identified:\n\n${dirList}\n\nEach direction has been mapped to specific obligations and action items in the pipeline output.`,
-      sources: directions.slice(0, 2).map((d: any) => ({
-        page: d.page_reference || "N/A",
-        text: d.text?.substring(0, 120) + "..." || "Direction text",
-      })),
-      timestamp: new Date(),
-    };
-  }
+function SimplifyButton({
+  messageId,
+  text,
+  onSimplified,
+}: {
+  messageId: string;
+  text: string;
+  onSimplified: (simplified: string) => void;
+}) {
+  const [loading, setLoading] = useState(false);
 
-  if (q.includes("deadline") || q.includes("timeline") || q.includes("when") || q.includes("time")) {
-    const deadlineInfo = deadlines.length > 0
-      ? deadlines.map((d: any) => `• ${d.description}: ${d.date || d.deadline_date || "Date not specified"} (${d.days_remaining != null ? `${d.days_remaining} days remaining` : "timeline pending"})`).join("\n")
-      : "No explicit deadlines were identified. However, standard statutory limitation periods may apply.";
-    return {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `Here are the critical timelines for ${caseName}:\n\n${deadlineInfo}\n\nI recommend setting up calendar reminders for each deadline to ensure timely compliance.`,
-      sources: [{ page: "Timeline Analysis", text: "Deadlines derived from order text and statutory provisions" }],
-      timestamp: new Date(),
-    };
-  }
-
-  if (q.includes("appeal") || q.includes("challenge") || q.includes("review")) {
-    const rec = appealRec?.recommendation?.replace(/_/g, " ") || "not determined";
-    const reasoning = appealRec?.reasoning || "Appeal analysis was not conclusive based on available information.";
-    const forum = appealRec?.appeal_forum || "the appropriate appellate authority";
-    const limitation = appealRec?.limitation_period || "as per applicable statute";
-    return {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `**Appeal Analysis for ${caseName}:**\n\n**Recommendation:** ${rec.charAt(0).toUpperCase() + rec.slice(1)}\n\n**Reasoning:** ${reasoning}\n\n**Appeal Forum:** ${forum}\n**Limitation Period:** ${limitation}\n\nNote: This is an AI-assisted analysis. Please consult with your legal department for a definitive opinion.`,
-      sources: [{ page: "Legal Analysis", text: "Appeal viability assessed based on case outcome, legal grounds, and statutory provisions" }],
-      timestamp: new Date(),
-    };
-  }
-
-  if (q.includes("miss") || q.includes("fail") || q.includes("consequence") || q.includes("contempt") || q.includes("penalty")) {
-    const risks = respondentActions
-      .filter((a: any) => a.compliance_risk_if_missed)
-      .map((a: any) => `• ${a.description}: **Risk** — ${a.compliance_risk_if_missed}`)
-      .join("\n");
-    return {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `**Consequences of non-compliance in ${caseName}:**\n\n${risks || "• Potential contempt of court proceedings\n• Administrative penalties\n• Matter may be listed for show-cause"}\n\nThe court's order typically carries mandatory compliance obligations. Failure to act within stipulated timelines may result in the court initiating suo motu proceedings.`,
-      sources: [{ page: "Compliance Risk Analysis", text: "Risk assessment based on court directives and statutory consequences" }],
-      timestamp: new Date(),
-    };
-  }
-
-  if (q.includes("department") || q.includes("notify") || q.includes("responsible") || q.includes("who")) {
-    const depts = [...new Set([...respondentActions, ...petitionerActions]
-      .map((a: any) => a.responsible_department)
-      .filter(Boolean))];
-    const deptList = depts.length > 0
-      ? depts.map(d => `• ${d}`).join("\n")
-      : "• The concerned department(s) should be identified based on the nature of directives.";
-    return {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `**Departments involved in ${caseName}:**\n\n${deptList}\n\nI recommend immediate notification to all listed departments with a copy of the court order and a clear breakdown of their respective obligations.`,
-      sources: [{ page: "Action Plan", text: "Department assignments derived from obligation analysis" }],
-      timestamp: new Date(),
-    };
-  }
-
-  if (q.includes("respondent") && (q.includes("report") || q.includes("obligat"))) {
-    return {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `**Respondent's reporting obligations in ${caseName}:**\n\nThe respondent (${respondent}) is required to comply with the court's directions as specified in the order. Based on the extracted data:\n\n${respondentActions.slice(0, 3).map((a: any) => `• **${a.type}:** ${a.description}`).join("\n") || "• Specific reporting obligations are detailed in the action plan section."}\n\nAll compliance reports should be submitted to the Registry of ${court}.`,
-      sources: [{ page: "Order Text", text: "Respondent obligations extracted from court directions" }],
-      timestamp: new Date(),
-    };
-  }
-
-  if (q.includes("summar") || q.includes("overview") || q.includes("about")) {
-    return {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `**Case Summary — ${caseName}:**\n\n**Court:** ${court}\n**Judge:** ${judge}\n**Petitioner:** ${petitioner}\n**Respondent:** ${respondent}\n**Outcome:** ${outcome}\n\n${legalSummary}\n\nThe multi-agent pipeline has identified ${respondentActions.length} respondent actions and ${petitionerActions.length} petitioner actions requiring attention.`,
-      sources: [{ page: "Full Document", text: "Summary compiled from extracted case metadata and legal analysis" }],
-      timestamp: new Date(),
-    };
-  }
-
-  // Default fallback
-  return {
-    id: Date.now().toString(),
-    role: "assistant",
-    content: `Based on my analysis of ${caseName}, here is what I found:\n\n${legalSummary}\n\nThe case involves ${petitioner} (petitioner) vs ${respondent} (respondent), decided by ${judge} at ${court}. The outcome was: **${outcome}**.\n\nWould you like me to elaborate on any specific aspect — directions, deadlines, appeal options, or departmental responsibilities?`,
-    sources: [{ page: "Full Analysis", text: "Response generated from multi-agent pipeline output" }],
-    timestamp: new Date(),
+  const handleSimplify = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/chat/simplify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (data.simplified) {
+        onSimplified(data.simplified);
+      }
+    } catch {
+      onSimplified("Could not simplify. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
+
+  return (
+    <button
+      onClick={handleSimplify}
+      disabled={loading}
+      className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/15 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+    >
+      {loading ? (
+        <RefreshCw size={10} className="animate-spin" />
+      ) : (
+        <Lightbulb size={10} />
+      )}
+      {loading ? "Simplifying..." : "Explain Simply"}
+    </button>
+  );
+}
+
+function AlternativeAnswer({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400 uppercase tracking-widest hover:text-violet-800 dark:hover:text-violet-300 transition-colors"
+      >
+        <RefreshCw size={10} />
+        Alternative interpretation
+        {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+      </button>
+      {expanded && (
+        <div className="mt-1.5 px-3 py-2.5 bg-violet-50 dark:bg-violet-500/5 border border-violet-200 dark:border-violet-500/15 rounded-xl">
+          <p className="text-[12px] text-violet-700 dark:text-violet-300/80 leading-relaxed">
+            {text}
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function LegalChatbot({
   extractedData,
   synthesis,
+  caseId,
 }: {
   extractedData: any;
   synthesis: any;
+  caseId?: string | null;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
       role: "assistant",
-      content: "Hello! I'm your **CDP Legal Assistant**. I have analyzed this judgment using the multi-agent pipeline. Ask me anything about the case — directions, deadlines, appeal options, compliance risks, or departmental responsibilities.\n\nYou can also try one of the suggested questions below.",
+      content:
+        "Hello! I'm the **CDP Legal Intelligence Assistant**.\n\nI can answer questions about this judgment using **4 intelligence modes**:\n\n• **Verified Records** — from approved action plans\n• **Source-Grounded** — retrieved from the judgment text\n• **General Legal** — procedural law knowledge\n• **Mixed Analysis** — combined reasoning\n\nEvery response includes a mode label, confidence score, and source citations.",
+      mode: "VERIFIED_OPERATIONAL",
+      confidence: 1,
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [typingStage, setTypingStage] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -172,14 +209,12 @@ export default function LegalChatbot({
   }, [messages]);
 
   useEffect(() => {
-    if (isOpen && inputRef.current) {
-      inputRef.current.focus();
-    }
+    if (isOpen && inputRef.current) inputRef.current.focus();
   }, [isOpen]);
 
   const handleSend = async (text?: string) => {
     const question = text || input.trim();
-    if (!question) return;
+    if (!question || isTyping) return;
 
     const userMsg: ChatMessage = {
       id: Date.now().toString() + "-user",
@@ -191,13 +226,62 @@ export default function LegalChatbot({
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsTyping(true);
+    setTypingStage("Classifying query...");
 
-    // Simulate network delay for realism
-    await new Promise((r) => setTimeout(r, 800 + Math.random() * 1200));
+    try {
+      // Build conversation history for context
+      const history = messages
+        .filter((m) => m.id !== "welcome")
+        .slice(-6)
+        .map((m) => ({ role: m.role, content: m.content }));
 
-    const response = getSimulatedResponse(question, extractedData, synthesis);
-    setMessages((prev) => [...prev, response]);
-    setIsTyping(false);
+      setTypingStage("Retrieving evidence...");
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: question,
+          caseId: caseId || undefined,
+          extractedData,
+          synthesis,
+          conversationHistory: history,
+        }),
+      });
+
+      setTypingStage("Generating response...");
+      const data = await res.json();
+
+      const assistantMsg: ChatMessage = {
+        id: Date.now().toString() + "-assistant",
+        role: "assistant",
+        content: data.answer || "I couldn't generate a response. Please try again.",
+        mode: data.mode || "INSUFFICIENT_EVIDENCE",
+        confidence: data.confidence || 0,
+        sources: data.sources || [],
+        query_type: data.query_type,
+        reasoning: data.reasoning,
+        alternative_answer: data.alternative_answer || undefined,
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString() + "-error",
+          role: "assistant",
+          content: "An error occurred while processing your question. Please try again.",
+          mode: "INSUFFICIENT_EVIDENCE" as ResponseMode,
+          confidence: 0,
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsTyping(false);
+      setTypingStage("");
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -209,7 +293,7 @@ export default function LegalChatbot({
 
   return (
     <>
-      {/* Floating Trigger Button */}
+      {/* Floating Trigger */}
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
@@ -222,8 +306,7 @@ export default function LegalChatbot({
 
       {/* Chat Panel */}
       {isOpen && (
-        <div className="fixed bottom-8 right-8 z-50 w-[420px] h-[600px] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl dark:shadow-[0_0_40px_rgba(6,182,212,0.15)] border border-slate-200 dark:border-white/10 flex flex-col overflow-hidden transition-all animate-in slide-in-from-bottom-4 duration-300">
-          
+        <div className="fixed bottom-8 right-8 z-50 w-[440px] h-[640px] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl dark:shadow-[0_0_40px_rgba(6,182,212,0.15)] border border-slate-200 dark:border-white/10 flex flex-col overflow-hidden">
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-700 dark:from-cyan-600 dark:to-blue-700 px-5 py-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -232,26 +315,22 @@ export default function LegalChatbot({
               </div>
               <div>
                 <h3 className="text-white font-bold text-sm tracking-wide">CDP Legal Assistant</h3>
-                <p className="text-white/60 text-[10px] font-medium tracking-widest uppercase">RAG-Powered • Source-Grounded</p>
+                <p className="text-white/60 text-[10px] font-medium tracking-widest uppercase">
+                  Hybrid RAG • {caseId ? "Case Indexed" : "General Mode"}
+                </p>
               </div>
             </div>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-            >
+            <button onClick={() => setIsOpen(false)} className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
               <X size={18} className="text-white" />
             </button>
           </div>
 
-          {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-50 dark:bg-[#0a0a0a]">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 dark:bg-[#0a0a0a]">
             {messages.map((msg) => (
               <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                {/* Avatar */}
                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                  msg.role === "user"
-                    ? "bg-blue-100 dark:bg-blue-500/20"
-                    : "bg-indigo-100 dark:bg-cyan-500/20"
+                  msg.role === "user" ? "bg-blue-100 dark:bg-blue-500/20" : "bg-indigo-100 dark:bg-cyan-500/20"
                 }`}>
                   {msg.role === "user" ? (
                     <User size={16} className="text-blue-600 dark:text-blue-400" />
@@ -260,15 +339,31 @@ export default function LegalChatbot({
                   )}
                 </div>
 
-                {/* Bubble */}
                 <div className={`max-w-[85%] ${msg.role === "user" ? "items-end" : ""}`}>
+                  {/* Mode Badge */}
+                  {msg.role === "assistant" && msg.mode && msg.id !== "welcome" && (
+                    <div className="flex items-center gap-2 mb-1.5">
+                      {(() => {
+                        const config = MODE_CONFIG[msg.mode];
+                        const Icon = config.icon;
+                        return (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${config.color} ${config.darkColor}`}>
+                            <Icon size={10} />
+                            {config.label}
+                          </span>
+                        );
+                      })()}
+                      {msg.confidence != null && <ConfidenceBadge confidence={msg.confidence} />}
+                    </div>
+                  )}
+
+                  {/* Message Bubble */}
                   <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                     msg.role === "user"
                       ? "bg-blue-600 dark:bg-cyan-600 text-white rounded-tr-md"
                       : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 rounded-tl-md shadow-sm"
                   }`}>
                     {msg.content.split("\n").map((line, i) => {
-                      // Simple bold markdown
                       const parts = line.split(/\*\*(.*?)\*\*/g);
                       return (
                         <p key={i} className={i > 0 ? "mt-1.5" : ""}>
@@ -280,35 +375,65 @@ export default function LegalChatbot({
                     })}
                   </div>
 
-                  {/* Sources */}
+                  {/* Source Panel */}
                   {msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      {msg.sources.map((src, i) => (
-                        <div key={i} className="flex items-start gap-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-500/5 border border-indigo-100 dark:border-indigo-500/10 rounded-xl">
-                          <BookOpen size={12} className="text-indigo-500 dark:text-indigo-400 mt-0.5 shrink-0" />
-                          <div>
-                            <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">{src.page}</span>
-                            <p className="text-[11px] text-indigo-500/70 dark:text-indigo-300/50 mt-0.5 line-clamp-2">{src.text}</p>
-                          </div>
-                        </div>
-                      ))}
+                    <SourcePanel sources={msg.sources} />
+                  )}
+
+                  {/* Alternative Answer */}
+                  {msg.role === "assistant" && msg.alternative_answer && msg.id !== "welcome" && (
+                    <AlternativeAnswer text={msg.alternative_answer} />
+                  )}
+
+                  {/* Action Buttons */}
+                  {msg.role === "assistant" && msg.id !== "welcome" && (
+                    <div className="mt-2 flex items-center gap-2">
+                      {!msg.simplified && (
+                        <SimplifyButton
+                          messageId={msg.id}
+                          text={msg.content}
+                          onSimplified={(simplified) => {
+                            setMessages((prev) =>
+                              prev.map((m) => m.id === msg.id ? { ...m, simplified } : m)
+                            );
+                          }}
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Simplified Version */}
+                  {msg.simplified && (
+                    <div className="mt-2 bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/15 rounded-xl px-3 py-2.5">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Lightbulb size={11} className="text-amber-600 dark:text-amber-400" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">Plain English</span>
+                      </div>
+                      <p className="text-[12px] text-amber-800 dark:text-amber-200/80 leading-relaxed">{msg.simplified}</p>
                     </div>
                   )}
                 </div>
               </div>
             ))}
 
-            {/* Typing indicator */}
+            {/* Typing Indicator */}
             {isTyping && (
               <div className="flex gap-3">
                 <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-cyan-500/20 flex items-center justify-center shrink-0">
                   <Sparkles size={16} className="text-indigo-600 dark:text-cyan-400" />
                 </div>
                 <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-2xl rounded-tl-md px-4 py-3 shadow-sm">
-                  <div className="flex gap-1.5">
-                    <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  <div className="flex items-center gap-2">
+                    <div className="flex gap-1.5">
+                      <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                      <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                    </div>
+                    {typingStage && (
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium ml-1">
+                        {typingStage}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -320,7 +445,9 @@ export default function LegalChatbot({
           {/* Suggested Questions */}
           {messages.length <= 1 && (
             <div className="px-4 py-3 border-t border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shrink-0">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">Suggested Questions</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
+                Suggested Questions
+              </p>
               <div className="flex flex-wrap gap-1.5">
                 {SUGGESTED_QUESTIONS.map((q, i) => (
                   <button
@@ -336,7 +463,7 @@ export default function LegalChatbot({
             </div>
           )}
 
-          {/* Input Area */}
+          {/* Input */}
           <div className="px-4 py-3 border-t border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shrink-0">
             <div className="flex items-center gap-2">
               <input

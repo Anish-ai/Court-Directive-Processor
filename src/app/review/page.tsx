@@ -12,7 +12,7 @@ import LegalChatbot from '@/components/LegalChatbot';
 
 export default function ReviewPage() {
   const router = useRouter();
-  const { activeFile, extractedData, legalAnalysis, timeline, synthesis, pipelineResult, setPipelineResult } = useAppContext();
+  const { activeFile, extractedData, legalAnalysis, timeline, synthesis, pipelineResult, setPipelineResult, caseId } = useAppContext();
   
   const [revealPhase, setRevealPhase] = useState(0);
   const [activeTab, setActiveTab] = useState<"petitioner" | "respondent">("respondent");
@@ -348,7 +348,7 @@ export default function ReviewPage() {
       </div>
 
       {/* RAG Legal Chatbot */}
-      <LegalChatbot extractedData={extractedData} synthesis={synthesis} />
+      <LegalChatbot extractedData={extractedData} synthesis={synthesis} caseId={caseId} />
     </div>
   );
 }

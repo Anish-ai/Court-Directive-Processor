@@ -10,6 +10,9 @@ import { runTimelineAgent } from '@/lib/agents/timeline';
 import { runPetitionerActionAgent } from '@/lib/agents/petitioner';
 import { runRespondentActionAgent } from '@/lib/agents/respondent';
 import { runSynthesisAgent } from '@/lib/agents/synthesis';
+import { chunkDocument } from '@/lib/rag/chunker';
+import { embedBatch } from '@/lib/rag/embeddings';
+import { addDocument } from '@/lib/rag/vector-store';
 
 export async function POST(request: Request) {
   try {
@@ -20,14 +23,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
+    const pdfType = (formData.get('pdfType') as string) || 'text';
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
     // ──────────────────────────────────────────────
     // STAGE 1: Ingestion Agent (code-only, no LLM)
     // ──────────────────────────────────────────────
-    console.log('[Pipeline] Stage 1: Ingestion Agent...');
-    const ingestion = await runIngestionAgent(buffer);
+    console.log(`[Pipeline] Stage 1: Ingestion Agent (mode: ${pdfType})...`);
+    const ingestion = await runIngestionAgent(buffer, pdfType as 'text' | 'scanned');
 
     // ──────────────────────────────────────────────
     // STAGE 2: Extraction Agent (LLM)
@@ -67,7 +71,26 @@ export async function POST(request: Request) {
 
     console.log('[Pipeline] ✅ All agents completed successfully.');
 
+    // ──────────────────────────────────────────────
+    // STAGE 8: RAG Indexing (chunk + embed + store)
+    // ──────────────────────────────────────────────
+    const caseId = extraction?.case_details?.case_number
+      ? extraction.case_details.case_number.replace(/[^a-zA-Z0-9]/g, '_')
+      : `case_${Date.now()}`;
+
+    try {
+      console.log(`[Pipeline] Stage 8: RAG Indexing (caseId: ${caseId})...`);
+      const chunks = chunkDocument(ingestion.full_text, ingestion.page_map, caseId);
+      const chunkTexts = chunks.map(c => c.text);
+      const embeddings = await embedBatch(chunkTexts);
+      addDocument(caseId, chunks, embeddings);
+      console.log(`[Pipeline] ✅ RAG index ready: ${chunks.length} chunks indexed.`);
+    } catch (ragErr: any) {
+      console.warn(`[Pipeline] ⚠️ RAG indexing failed (non-fatal): ${ragErr.message}`);
+    }
+
     return NextResponse.json({
+      caseId,
       extraction,
       legalAnalysis,
       timeline,

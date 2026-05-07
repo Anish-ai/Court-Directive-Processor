@@ -254,7 +254,7 @@ export default function CaseDetailsPage() {
       </div>
 
       {/* RAG Legal Chatbot */}
-      <LegalChatbot extractedData={record} synthesis={record} />
+      <LegalChatbot extractedData={record} synthesis={record} caseId={record?.case_details?.case_number?.replace(/[^a-zA-Z0-9]/g, '_') || null} />
     </div>
   );
 }

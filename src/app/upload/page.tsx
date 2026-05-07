@@ -2,13 +2,14 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppContext } from '../providers';
-import { UploadCloud, FileText, ScanLine } from 'lucide-react';
+import { UploadCloud, FileText, ScanLine, Eye, FileType } from 'lucide-react';
 import ProcessingPipeline from '@/components/ProcessingPipeline';
 
 export default function UploadPage() {
   const router = useRouter();
   const { setActiveFile, setPipelineResult } = useAppContext();
   const [file, setLocalFile] = useState<File | null>(null);
+  const [pdfType, setPdfType] = useState<'text' | 'scanned'>('text');
   
   const [pipelineStatus, setPipelineStatus] = useState<"idle" | "processing" | "retrying" | "error" | "success">("idle");
 
@@ -23,6 +24,7 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append('file', file as File);
+      formData.append('pdfType', pdfType);
       
       const res = await fetch('/api/process', {
         method: 'POST',
@@ -130,8 +132,44 @@ export default function UploadPage() {
               )}
             </div>
 
+            {/* PDF Type Toggle — outside drop zone so clicks work */}
+            {file && pipelineStatus === "idle" && (
+              <div className="mt-6 flex flex-col items-center gap-2">
+                <p className="text-[10px] font-black tracking-widest uppercase text-slate-400 dark:text-slate-500">Select PDF Type</p>
+                <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setPdfType('text')}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                      pdfType === 'text'
+                        ? 'bg-blue-600 dark:bg-cyan-600 text-white shadow-md'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <FileType size={16} />
+                    Text PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPdfType('scanned')}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                      pdfType === 'scanned'
+                        ? 'bg-blue-600 dark:bg-cyan-600 text-white shadow-md'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Eye size={16} />
+                    Scanned PDF
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+                  {pdfType === 'text' ? 'Uses fast text parser — best for digital PDFs' : 'Uses AI Vision OCR — best for scanned/image PDFs'}
+                </p>
+              </div>
+            )}
+
             {pipelineStatus === "idle" && (
-              <div className="mt-10 flex justify-end">
+              <div className="mt-8 flex justify-end">
                 <button
                   disabled={!file}
                   onClick={initSystemProcessing}

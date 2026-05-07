@@ -11,6 +11,7 @@ type AppContextType = {
   setPipelineResult: (d: any) => void;
 
   // Convenience getters for individual pieces
+  caseId: string | null;
   extractedData: any;
   legalAnalysis: any;
   timeline: any;
@@ -29,6 +30,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       activeFile, setActiveFile,
       pipelineResult, setPipelineResult,
+      caseId: pipelineResult?.caseId ?? null,
       extractedData: pipelineResult?.extraction ?? null,
       legalAnalysis: pipelineResult?.legalAnalysis ?? null,
       timeline: pipelineResult?.timeline ?? null,
